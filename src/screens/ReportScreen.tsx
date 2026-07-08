@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Brand, HeadingFont } from '@/constants/theme';
 import { getOrderStatus, useAppContext } from '@/context/AppContext';
 import { createBackupFile, importBackup } from '@/utils/backup';
 import { createExcelFile } from '@/utils/excelExport';
@@ -202,7 +203,7 @@ export function ReportScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Brand.parchment,
   },
   content: {
     padding: 16,
@@ -211,9 +212,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
+    fontFamily: HeadingFont,
   },
   summaryCard: {
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     borderRadius: 12,
     padding: 16,
     gap: 4,
@@ -226,7 +228,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 13,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   summaryValue: {
     fontSize: 18,
@@ -238,7 +240,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
     marginVertical: 8,
   },
   splitRow: {
@@ -257,7 +259,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   dayCard: {
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     borderRadius: 12,
     padding: 12,
     gap: 4,
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   dayLabel: {
-    color: '#60646C',
+    color: Brand.inkMuted,
     fontSize: 13,
   },
   dayValue: {
@@ -281,7 +283,7 @@ const styles = StyleSheet.create({
   exportButton: {
     minHeight: 48,
     borderRadius: 8,
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -298,12 +300,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 48,
     borderRadius: 8,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryButtonText: {
-    color: '#208AEF',
+    color: Brand.plum,
     fontWeight: '700',
   },
 });

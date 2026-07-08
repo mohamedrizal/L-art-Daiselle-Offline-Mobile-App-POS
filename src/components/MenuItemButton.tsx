@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Brand } from '@/constants/theme';
 import { MenuItem } from '@/context/AppContext';
 import { formatRupiah } from '@/utils/formatRupiah';
 
@@ -21,7 +22,7 @@ export function MenuItemButton({ item, onPress }: Props) {
           <Text style={styles.imagePlaceholderText}>🎨</Text>
         </View>
       )}
-      <Text style={styles.name} numberOfLines={2}>
+      <Text style={styles.name} numberOfLines={3}>
         {item.name}
       </Text>
       <Text style={styles.price}>{formatRupiah(item.price)}</Text>
@@ -32,9 +33,9 @@ export function MenuItemButton({ item, onPress }: Props) {
 const styles = StyleSheet.create({
   container: {
     width: '31%',
-    minHeight: 120,
+    minHeight: 136,
     borderRadius: 12,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     padding: 8,
     alignItems: 'center',
     gap: 4,
@@ -50,18 +51,18 @@ const styles = StyleSheet.create({
   imagePlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
   },
   imagePlaceholderText: {
     fontSize: 24,
   },
   name: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
   },
   price: {
     fontSize: 12,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
 });

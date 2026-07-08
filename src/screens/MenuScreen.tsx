@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Brand, HeadingFont } from '@/constants/theme';
 import { MenuItem, useAppContext } from '@/context/AppContext';
 import { formatRupiah } from '@/utils/formatRupiah';
 
@@ -180,7 +181,7 @@ export function MenuScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Brand.parchment,
   },
   header: {
     flexDirection: 'row',
@@ -192,12 +193,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
+    fontFamily: HeadingFont,
   },
   addButton: {
     minHeight: 44,
     paddingHorizontal: 16,
     justifyContent: 'center',
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
     borderRadius: 8,
   },
   addButtonText: {
@@ -211,7 +213,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#60646C',
+    color: Brand.inkMuted,
     marginTop: 32,
   },
   row: {
@@ -220,7 +222,7 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 8,
     borderRadius: 12,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
   },
   thumbnail: {
     width: 48,
@@ -230,7 +232,7 @@ const styles = StyleSheet.create({
   thumbnailPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
   },
   rowInfo: {
     flex: 1,
@@ -240,7 +242,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   rowPrice: {
-    color: '#60646C',
+    color: Brand.inkMuted,
     fontSize: 13,
   },
   iconButton: {
@@ -251,12 +253,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconButtonText: {
-    color: '#208AEF',
+    color: Brand.plum,
     fontWeight: '600',
   },
   deleteButton: {},
   deleteButtonText: {
-    color: '#D93025',
+    color: Brand.danger,
   },
   modalOverlay: {
     flex: 1,
@@ -264,7 +266,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Brand.parchment,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,
@@ -273,13 +275,14 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
+    fontFamily: HeadingFont,
   },
   imagePickerButton: {
     alignSelf: 'center',
     width: 100,
     height: 100,
     borderRadius: 12,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -289,7 +292,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   imagePickerText: {
-    color: '#60646C',
+    color: Brand.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     paddingHorizontal: 8,
@@ -297,13 +300,13 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: '#E0E1E6',
+    borderColor: Brand.parchmentSelected,
     borderRadius: 8,
     paddingHorizontal: 12,
     fontSize: 15,
   },
   errorText: {
-    color: '#D93025',
+    color: Brand.danger,
   },
   modalActions: {
     flexDirection: 'row',
@@ -318,10 +321,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
   },
   saveButton: {
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
   },
   modalButtonText: {
     fontWeight: '600',

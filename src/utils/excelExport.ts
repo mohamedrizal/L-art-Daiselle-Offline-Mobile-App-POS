@@ -7,7 +7,6 @@ import { ORDER_STATUS_LABEL } from '@/utils/orderStatus';
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: 'Tunai',
   qris: 'QRIS',
-  transfer: 'Transfer',
 };
 
 function formatDate(iso: string): string {
@@ -45,17 +44,40 @@ export async function createExcelFile(orders: Order[]): Promise<File> {
   ];
 
   sorted.forEach((order, index) => {
+    const customerLabel =
+      order.customerName +
+      (order.groupMemberNames && order.groupMemberNames.length > 0
+        ? ` (+${order.groupMemberNames.join(', ')})`
+        : '');
+
     order.items.forEach((item) => {
       detailRows.push([
         index + 1,
         formatDate(order.createdAt),
         formatTime(order.createdAt),
-        order.customerName,
+        customerLabel,
         order.customerWhatsapp,
         item.name,
         item.qty,
         item.price,
         item.price * item.qty,
+        PAYMENT_LABEL[order.paymentMethod],
+        ORDER_STATUS_LABEL[getOrderStatus(order)],
+        order.totalHarga,
+      ]);
+    });
+
+    (order.addOns ?? []).forEach((addOn) => {
+      detailRows.push([
+        index + 1,
+        formatDate(order.createdAt),
+        formatTime(order.createdAt),
+        customerLabel,
+        order.customerWhatsapp,
+        addOn.name,
+        1,
+        addOn.price,
+        addOn.price,
         PAYMENT_LABEL[order.paymentMethod],
         ORDER_STATUS_LABEL[getOrderStatus(order)],
         order.totalHarga,

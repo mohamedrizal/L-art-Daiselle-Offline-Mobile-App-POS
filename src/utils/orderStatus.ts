@@ -1,3 +1,4 @@
+import { Brand } from '@/constants/theme';
 import { OrderStatus } from '@/context/AppContext';
 
 export const ORDER_STATUS_OPTIONS: OrderStatus[] = ['pending', 'on_progress', 'completed', 'refund'];
@@ -10,8 +11,8 @@ export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 export const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {
-  pending: '#F5A623',
-  on_progress: '#4A90D9',
-  completed: '#34A853',
-  refund: '#D93025',
+  pending: Brand.gold,
+  on_progress: Brand.skyBlue,
+  completed: Brand.success,
+  refund: Brand.danger,
 };

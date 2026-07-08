@@ -26,6 +26,23 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
+export const Brand = {
+  parchment: '#F7F1E3',      // main light background (replaces plain white '#ffffff')
+  parchmentDark: '#EDE3CC',  // secondary/card background (replaces '#F0F0F3')
+  parchmentSelected: '#E3D6B8', // selected/pressed state background (replaces '#E0E1E6')
+  plum: '#8E7CB5',           // primary accent — buttons, selected tab, links (replaces '#208AEF')
+  plumLight: '#C9B8E8',      // lighter plum for subtle accents/borders
+  skyBlue: '#9FD1D9',        // secondary accent (e.g. "on progress" status)
+  gold: '#C9972E',           // highlight accent (e.g. "pending" status, badges)
+  ink: '#3B2E22',            // primary dark text (replaces '#000000')
+  inkMuted: '#6B5D4F',       // secondary/muted text (replaces '#60646C')
+  danger: '#B3402E',         // destructive actions / refund status (replaces '#D93025')
+  success: '#4E7A51',        // completed status (replaces '#34A853')
+  cardBorder: '#D8CBA3',     // subtle border for cards/inputs (new — decorative touch)
+} as const;
+
+export const HeadingFont = 'MedievalSharp';
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */

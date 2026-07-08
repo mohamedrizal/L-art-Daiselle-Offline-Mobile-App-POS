@@ -1,11 +1,15 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -15,13 +19,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CartRow } from '@/components/CartRow';
 import { MenuItemButton } from '@/components/MenuItemButton';
 import { WaitingListModal } from '@/components/WaitingListModal';
-import { getOrderStatus, MenuItem, OrderItem, PaymentMethod, useAppContext } from '@/context/AppContext';
+import { Brand, HeadingFont } from '@/constants/theme';
+import { getOrderStatus, MenuItem, OrderAddOn, OrderItem, PaymentMethod, useAppContext } from '@/context/AppContext';
+import { formatPhoneNumber } from '@/utils/contactLinks';
+import { formatDateKey, getNextAvailableSlot, isSlotTaken } from '@/utils/timeSlots';
 import { formatRupiah } from '@/utils/formatRupiah';
+import { generateId } from '@/utils/id';
 
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: 'cash', label: 'Tunai' },
   { value: 'qris', label: 'QRIS' },
-  { value: 'transfer', label: 'Transfer' },
 ];
 
 export function OrderScreen() {
@@ -34,12 +41,34 @@ export function OrderScreen() {
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsapp, setCustomerWhatsapp] = useState('');
   const [customerInstagram, setCustomerInstagram] = useState('');
+  const [groupMemberNames, setGroupMemberNames] = useState<string[]>([]);
+  const [addOns, setAddOns] = useState<OrderAddOn[]>([]);
+  const [addOnNameInput, setAddOnNameInput] = useState('');
+  const [addOnPriceInput, setAddOnPriceInput] = useState('');
   const [isCartExpanded, setIsCartExpanded] = useState(true);
   const [isWaitingListVisible, setIsWaitingListVisible] = useState(false);
+  const [isCustomerModalVisible, setIsCustomerModalVisible] = useState(false);
+  const [isAddOnModalVisible, setIsAddOnModalVisible] = useState(false);
+  const [isPreOrder, setIsPreOrder] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState<Date>(new Date());
+  const [scheduledTime, setScheduledTime] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const cartScrollRef = useRef<ScrollView>(null);
   const previousCartLengthRef = useRef(0);
 
   const pendingOrders = orders.filter((o) => getOrderStatus(o) === 'pending');
+
+  const bookedTimesForDate = orders
+    .filter(
+      (o) =>
+        o.id !== orderId &&
+        o.scheduledDate === formatDateKey(scheduledDate) &&
+        (getOrderStatus(o) === 'pending' || getOrderStatus(o) === 'on_progress') &&
+        o.scheduledTime
+    )
+    .map((o) => o.scheduledTime as string)
+    .sort();
 
   useFocusEffect(
     useCallback(() => {
@@ -52,6 +81,17 @@ export function OrderScreen() {
           setCustomerName(existing.customerName);
           setCustomerWhatsapp(existing.customerWhatsapp);
           setCustomerInstagram(existing.customerInstagram);
+          setGroupMemberNames(existing.groupMemberNames ?? []);
+          setAddOns(existing.addOns ?? []);
+          if (existing.scheduledDate) {
+            setIsPreOrder(true);
+            setScheduledDate(new Date(`${existing.scheduledDate}T00:00:00`)); // parse as local midnight, not UTC, to avoid a day-shift
+            setScheduledTime(existing.scheduledTime);
+          } else {
+            setIsPreOrder(false);
+            setScheduledDate(new Date());
+            setScheduledTime(null);
+          }
           previousCartLengthRef.current = existing.items.length;
           return;
         }
@@ -61,6 +101,11 @@ export function OrderScreen() {
       setCustomerName('');
       setCustomerWhatsapp('');
       setCustomerInstagram('');
+      setGroupMemberNames([]);
+      setAddOns([]);
+      setIsPreOrder(false);
+      setScheduledDate(new Date());
+      setScheduledTime(null);
       previousCartLengthRef.current = 0;
     }, [orderId, orders])
   );
@@ -100,7 +145,35 @@ export function OrderScreen() {
     previousCartLengthRef.current = cart.length;
   }, [cart, isCartExpanded]);
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const addOnsTotal = addOns.reduce((sum, addOn) => sum + addOn.price, 0);
+  const total = cartSubtotal + addOnsTotal;
+
+  const handleAddAddOn = () => {
+    const trimmedName = addOnNameInput.trim();
+    const price = Number(addOnPriceInput);
+    if (!trimmedName) {
+      Alert.alert('Nama add-on kosong', 'Isi nama add-on sebelum menambahkan.');
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      Alert.alert('Harga tidak valid', 'Harga add-on harus berupa angka lebih besar atau sama dengan 0.');
+      return;
+    }
+    setAddOns((prev) => [...prev, { id: generateId(), name: trimmedName, price }]);
+    setAddOnNameInput('');
+    setAddOnPriceInput('');
+  };
+
+  const removeAddOn = (id: string) => {
+    setAddOns((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const addGroupMember = () => setGroupMemberNames((prev) => [...prev, '']);
+  const updateGroupMember = (index: number, name: string) =>
+    setGroupMemberNames((prev) => prev.map((n, i) => (i === index ? name : n)));
+  const removeGroupMember = (index: number) =>
+    setGroupMemberNames((prev) => prev.filter((_, i) => i !== index));
 
   const handleSave = () => {
     const trimmedName = customerName.trim();
@@ -118,6 +191,10 @@ export function OrderScreen() {
       Alert.alert('Metode pembayaran', 'Pilih metode pembayaran sebelum menyimpan order.');
       return;
     }
+    if (isPreOrder && !scheduledTime) {
+      Alert.alert('Slot PO belum dipilih', 'Pilih tanggal dan jam slot PO sebelum menyimpan order.');
+      return;
+    }
 
     const patch = {
       customerName: trimmedName,
@@ -126,6 +203,10 @@ export function OrderScreen() {
       items: cart,
       paymentMethod,
       totalHarga: total,
+      scheduledDate: isPreOrder ? formatDateKey(scheduledDate) : null,
+      scheduledTime: isPreOrder ? scheduledTime : null,
+      groupMemberNames: groupMemberNames.map((n) => n.trim()).filter((n) => n.length > 0),
+      addOns,
     };
 
     if (orderId) {
@@ -139,6 +220,13 @@ export function OrderScreen() {
     setCustomerName('');
     setCustomerWhatsapp('');
     setCustomerInstagram('');
+    setGroupMemberNames([]);
+    setAddOns([]);
+    setAddOnNameInput('');
+    setAddOnPriceInput('');
+    setIsPreOrder(false);
+    setScheduledDate(new Date());
+    setScheduledTime(null);
     router.push('/history');
   };
 
@@ -148,6 +236,13 @@ export function OrderScreen() {
     setCustomerName('');
     setCustomerWhatsapp('');
     setCustomerInstagram('');
+    setGroupMemberNames([]);
+    setAddOns([]);
+    setAddOnNameInput('');
+    setAddOnPriceInput('');
+    setIsPreOrder(false);
+    setScheduledDate(new Date());
+    setScheduledTime(null);
     router.push('/history');
   };
 
@@ -162,28 +257,21 @@ export function OrderScreen() {
         )}
       </View>
 
-      <View style={styles.customerSection}>
-        <TextInput
-          style={styles.input}
-          placeholder="Nama Pelanggan"
-          value={customerName}
-          onChangeText={setCustomerName}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="No. WhatsApp (opsional)"
-          keyboardType="phone-pad"
-          value={customerWhatsapp}
-          onChangeText={setCustomerWhatsapp}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Nama Instagram (opsional)"
-          autoCapitalize="none"
-          value={customerInstagram}
-          onChangeText={setCustomerInstagram}
-        />
-      </View>
+      <Pressable style={styles.customerSummary} onPress={() => setIsCustomerModalVisible(true)}>
+        <View style={styles.customerSummaryText}>
+          <Text style={styles.customerSummaryLabel}>Info Pelanggan</Text>
+          <Text style={styles.customerSummaryValue} numberOfLines={1}>
+            {customerName || 'Tap untuk isi nama, kontak, & PO'}
+          </Text>
+        </View>
+        {isPreOrder && (
+          <View style={styles.customerSummaryBadge}>
+            <Text style={styles.customerSummaryBadgeText}>
+              PO {scheduledTime ?? '?'}
+            </Text>
+          </View>
+        )}
+      </Pressable>
 
       <FlatList
         data={menuItems}
@@ -225,6 +313,17 @@ export function OrderScreen() {
           )}
         </View>
       )}
+
+      <Pressable style={styles.addOnSummary} onPress={() => setIsAddOnModalVisible(true)}>
+        <View style={styles.addOnSummaryText}>
+          <Text style={styles.customerSummaryLabel}>Add-on</Text>
+          <Text style={styles.customerSummaryValue} numberOfLines={1}>
+            {addOns.length > 0
+              ? `${addOns.length} add-on · ${formatRupiah(addOnsTotal)}`
+              : 'Tap untuk tambah add-on'}
+          </Text>
+        </View>
+      </Pressable>
 
       <View style={styles.footer}>
         <View style={styles.paymentRow}>
@@ -269,6 +368,234 @@ export function OrderScreen() {
         orders={pendingOrders}
         onClose={() => setIsWaitingListVisible(false)}
       />
+
+      <Modal
+        visible={isCustomerModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsCustomerModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Info Pelanggan & PO</Text>
+
+            <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              <TextInput
+                style={styles.input}
+                placeholder="Nama Pelanggan"
+                value={customerName}
+                onChangeText={setCustomerName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="No. WhatsApp (opsional)"
+                keyboardType="phone-pad"
+                value={formatPhoneNumber(customerWhatsapp)}
+                onChangeText={(text) => setCustomerWhatsapp(text.replace(/\D/g, ''))}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Nama Instagram (opsional)"
+                autoCapitalize="none"
+                value={customerInstagram}
+                onChangeText={setCustomerInstagram}
+              />
+
+              <View style={styles.groupSection}>
+                <View style={styles.poToggleRow}>
+                  <Text style={styles.poToggleLabel}>Order untuk grup?</Text>
+                  <Switch
+                    value={groupMemberNames.length > 0}
+                    onValueChange={(value) => setGroupMemberNames(value ? [''] : [])}
+                    trackColor={{ false: Brand.parchmentSelected, true: Brand.plum }}
+                    thumbColor="#ffffff"
+                  />
+                </View>
+
+                {groupMemberNames.length > 0 && (
+                  <View style={styles.groupMembersList}>
+                    {groupMemberNames.map((name, index) => (
+                      <View key={index} style={styles.groupMemberRow}>
+                        <TextInput
+                          style={[styles.input, styles.groupMemberInput]}
+                          placeholder={`Nama anggota ${index + 1}`}
+                          value={name}
+                          onChangeText={(text) => updateGroupMember(index, text)}
+                        />
+                        <Pressable style={styles.groupMemberRemove} onPress={() => removeGroupMember(index)}>
+                          <Text style={styles.groupMemberRemoveText}>Hapus</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                    <Pressable style={styles.addGroupMemberButton} onPress={addGroupMember}>
+                      <Text style={styles.addGroupMemberButtonText}>+ Tambah Anggota</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.poSection}>
+                <View style={styles.poToggleRow}>
+                  <Text style={styles.poToggleLabel}>Jadwalkan sebagai PO?</Text>
+                  <Switch
+                    value={isPreOrder}
+                    onValueChange={(value) => {
+                      setIsPreOrder(value);
+                      if (value) {
+                        const today = new Date();
+                        setScheduledDate(today);
+                        setScheduledTime(getNextAvailableSlot(orders, formatDateKey(today), orderId));
+                      }
+                    }}
+                    trackColor={{ false: Brand.parchmentSelected, true: Brand.plum }}
+                    thumbColor="#ffffff"
+                  />
+                </View>
+
+                {isPreOrder && (
+                  <View style={styles.poDetails}>
+                    <Pressable style={styles.dateTrigger} onPress={() => setShowDatePicker(true)}>
+                      <Text style={styles.dateTriggerLabel}>Tanggal PO</Text>
+                      <Text style={styles.dateTriggerValue}>
+                        {scheduledDate.toLocaleDateString('id-ID', {
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                    </Pressable>
+
+                    {showDatePicker && (
+                      <DateTimePicker
+                        value={scheduledDate}
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                        minimumDate={new Date()}
+                        onChange={(event, date) => {
+                          setShowDatePicker(false);
+                          if (event.type !== 'dismissed' && date) {
+                            setScheduledDate(date);
+                            setScheduledTime(getNextAvailableSlot(orders, formatDateKey(date), orderId));
+                          }
+                        }}
+                      />
+                    )}
+
+                    <Text style={styles.poToggleLabel}>Jam PO</Text>
+                    <Pressable style={styles.dateTrigger} onPress={() => setShowTimePicker(true)}>
+                      <Text style={styles.dateTriggerLabel}>Jam</Text>
+                      <Text style={styles.dateTriggerValue}>{scheduledTime ?? 'Belum dipilih'}</Text>
+                    </Pressable>
+
+                    {showTimePicker && (
+                      <DateTimePicker
+                        value={(() => {
+                          const base = new Date(scheduledDate);
+                          if (scheduledTime) {
+                            const [hh, mm] = scheduledTime.split(':').map(Number);
+                            base.setHours(hh, mm, 0, 0);
+                          }
+                          return base;
+                        })()}
+                        mode="time"
+                        is24Hour
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        onChange={(event, date) => {
+                          setShowTimePicker(false);
+                          if (event.type === 'dismissed' || !date) return;
+                          const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(
+                            date.getMinutes()
+                          ).padStart(2, '0')}`;
+                          if (isSlotTaken(orders, formatDateKey(scheduledDate), timeStr, orderId)) {
+                            Alert.alert(
+                              'Jam sudah dipakai',
+                              `Sudah ada PO lain pada jam ${timeStr} di tanggal ini. Pilih jam lain.`
+                            );
+                            return;
+                          }
+                          setScheduledTime(timeStr);
+                        }}
+                      />
+                    )}
+
+                    <View style={styles.bookedTimesBox}>
+                      <Text style={styles.bookedTimesLabel}>
+                        Jam yang sudah dipesan di tanggal ini
+                      </Text>
+                      {bookedTimesForDate.length > 0 ? (
+                        <View style={styles.bookedTimesRow}>
+                          {bookedTimesForDate.map((time, index) => (
+                            <View key={`${time}-${index}`} style={styles.bookedTimeChip}>
+                              <Text style={styles.bookedTimeChipText}>{time}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <Text style={styles.bookedTimesEmpty}>Belum ada PO di tanggal ini.</Text>
+                      )}
+                    </View>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            <Pressable
+              style={styles.modalDoneButton}
+              onPress={() => setIsCustomerModalVisible(false)}>
+              <Text style={styles.modalDoneButtonText}>Selesai</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isAddOnModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsAddOnModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add-on</Text>
+
+            <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              {addOns.map((addOn) => (
+                <View key={addOn.id} style={styles.addOnRow}>
+                  <Text style={styles.addOnName} numberOfLines={2}>{addOn.name}</Text>
+                  <Text style={styles.addOnPrice}>{formatRupiah(addOn.price)}</Text>
+                  <Pressable style={styles.addOnRemove} onPress={() => removeAddOn(addOn.id)}>
+                    <Text style={styles.addOnRemoveText}>Hapus</Text>
+                  </Pressable>
+                </View>
+              ))}
+
+              <View style={styles.addOnForm}>
+                <TextInput
+                  style={[styles.input, styles.addOnFormNameInput]}
+                  placeholder="Nama Add-on"
+                  value={addOnNameInput}
+                  onChangeText={setAddOnNameInput}
+                />
+                <TextInput
+                  style={[styles.input, styles.addOnFormPriceInput]}
+                  placeholder="Harga"
+                  keyboardType="numeric"
+                  value={addOnPriceInput ? formatRupiah(Number(addOnPriceInput)) : ''}
+                  onChangeText={(text) => setAddOnPriceInput(text.replace(/\D/g, ''))}
+                />
+                <Pressable style={styles.addOnAddButton} onPress={handleAddAddOn}>
+                  <Text style={styles.addOnAddButtonText}>+ Tambah</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+
+            <Pressable
+              style={styles.modalDoneButton}
+              onPress={() => setIsAddOnModalVisible(false)}>
+              <Text style={styles.modalDoneButtonText}>Selesai</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -276,7 +603,7 @@ export function OrderScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Brand.parchment,
   },
   titleRow: {
     flexDirection: 'row',
@@ -289,6 +616,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
+    fontFamily: HeadingFont,
   },
   pendingBadge: {
     minHeight: 44,
@@ -302,18 +630,147 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#B36B00',
   },
-  customerSection: {
+  customerSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 16,
+    minHeight: 56,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Brand.parchmentSelected,
+    backgroundColor: Brand.parchmentDark,
+  },
+  customerSummaryText: {
+    flex: 1,
+  },
+  customerSummaryLabel: {
+    fontSize: 11,
+    color: Brand.inkMuted,
+  },
+  customerSummaryValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Brand.ink,
+  },
+  customerSummaryBadge: {
+    backgroundColor: Brand.gold,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  customerSummaryBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    maxHeight: '85%',
+    backgroundColor: Brand.parchment,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: HeadingFont,
+  },
+  modalScrollContent: {
+    gap: 12,
     paddingBottom: 8,
+  },
+  modalDoneButton: {
+    minHeight: 48,
+    borderRadius: 8,
+    backgroundColor: Brand.plum,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalDoneButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 16,
   },
   input: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: '#E0E1E6',
+    borderColor: Brand.parchmentSelected,
     borderRadius: 8,
     paddingHorizontal: 12,
     fontSize: 15,
+  },
+  poSection: {
+    gap: 8,
+  },
+  poToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: 44,
+  },
+  poToggleLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Brand.ink,
+  },
+  poDetails: {
+    gap: 8,
+  },
+  dateTrigger: {
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: Brand.parchmentDark,
+    paddingHorizontal: 12,
+    gap: 2,
+  },
+  dateTriggerLabel: {
+    fontSize: 11,
+    color: Brand.inkMuted,
+  },
+  dateTriggerValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Brand.ink,
+  },
+  bookedTimesBox: {
+    gap: 6,
+  },
+  bookedTimesLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Brand.inkMuted,
+  },
+  bookedTimesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  bookedTimeChip: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: Brand.parchmentSelected,
+  },
+  bookedTimeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Brand.ink,
+  },
+  bookedTimesEmpty: {
+    fontSize: 13,
+    color: Brand.inkMuted,
+    fontStyle: 'italic',
   },
   grid: {
     flex: 1,
@@ -328,12 +785,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#60646C',
+    color: Brand.inkMuted,
     marginTop: 16,
   },
   cartSection: {
     borderTopWidth: 1,
-    borderTopColor: '#E0E1E6',
+    borderTopColor: Brand.parchmentSelected,
   },
   cartHeader: {
     flexDirection: 'row',
@@ -348,7 +805,7 @@ const styles = StyleSheet.create({
   },
   cartHeaderChevron: {
     fontSize: 16,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   cartList: {
     maxHeight: 220,
@@ -360,7 +817,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     borderTopWidth: 1,
-    borderTopColor: '#E0E1E6',
+    borderTopColor: Brand.parchmentSelected,
     padding: 16,
     gap: 12,
   },
@@ -374,14 +831,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
   },
   paymentButtonSelected: {
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
   },
   paymentButtonText: {
     fontWeight: '600',
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   paymentButtonTextSelected: {
     color: '#ffffff',
@@ -393,7 +850,7 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: 15,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   totalValue: {
     fontSize: 20,
@@ -407,12 +864,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 48,
     borderRadius: 8,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cancelButtonText: {
-    color: '#60646C',
+    color: Brand.inkMuted,
     fontWeight: '700',
     fontSize: 16,
   },
@@ -420,7 +877,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 48,
     borderRadius: 8,
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -428,5 +885,112 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  groupSection: {
+    gap: 8,
+  },
+  groupMembersList: {
+    gap: 8,
+  },
+  groupMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  groupMemberInput: {
+    flex: 1,
+  },
+  groupMemberRemove: {
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  groupMemberRemoveText: {
+    color: Brand.danger,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  addGroupMemberButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: Brand.parchmentDark,
+  },
+  addGroupMemberButtonText: {
+    color: Brand.plum,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  addOnSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 56,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Brand.parchmentSelected,
+    backgroundColor: Brand.parchmentDark,
+  },
+  addOnSummaryText: {
+    flex: 1,
+  },
+  addOnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: Brand.parchmentDark,
+  },
+  addOnName: {
+    flex: 1,
+    fontWeight: '600',
+    fontSize: 14,
+    color: Brand.ink,
+  },
+  addOnPrice: {
+    fontSize: 13,
+    color: Brand.inkMuted,
+  },
+  addOnRemove: {
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  addOnRemoveText: {
+    color: Brand.danger,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  addOnForm: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addOnFormNameInput: {
+    flex: 1,
+  },
+  addOnFormPriceInput: {
+    width: 110,
+  },
+  addOnAddButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: Brand.plum,
+  },
+  addOnAddButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

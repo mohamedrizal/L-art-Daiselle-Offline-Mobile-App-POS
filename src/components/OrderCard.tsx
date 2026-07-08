@@ -1,13 +1,14 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Brand } from '@/constants/theme';
 import { getOrderStatus, Order, OrderStatus, PaymentMethod } from '@/context/AppContext';
+import { formatPhoneNumber } from '@/utils/contactLinks';
 import { formatRupiah } from '@/utils/formatRupiah';
 import { ORDER_STATUS_COLOR, ORDER_STATUS_LABEL, ORDER_STATUS_OPTIONS } from '@/utils/orderStatus';
 
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: 'Tunai',
   qris: 'QRIS',
-  transfer: 'Transfer',
 };
 
 type Props = {
@@ -24,9 +25,11 @@ export function OrderCard({ order, onEdit, onDelete, onStatusChange }: Props) {
   });
   const itemsSummary = order.items.map((item) => `${item.name} x${item.qty}`).join(', ');
   const status = getOrderStatus(order);
+  const allNames = [order.customerName, ...(order.groupMemberNames ?? [])];
+  const namesLabel = allNames.join(', ');
   const customerLine = order.customerWhatsapp
-    ? `${order.customerName} · ${order.customerWhatsapp}`
-    : order.customerName;
+    ? `${namesLabel} · ${formatPhoneNumber(order.customerWhatsapp)}`
+    : namesLabel;
 
   return (
     <View style={styles.container}>
@@ -44,11 +47,27 @@ export function OrderCard({ order, onEdit, onDelete, onStatusChange }: Props) {
         </View>
       </View>
 
-      <Text style={styles.customer} numberOfLines={1}>
+      <Text style={styles.customer} numberOfLines={2}>
         {customerLine}
       </Text>
 
-      <Text style={styles.items} numberOfLines={2}>
+      {order.scheduledDate && order.scheduledTime && (
+        <Text style={styles.scheduleLabel}>
+          PO: {new Date(`${order.scheduledDate}T00:00:00`).toLocaleDateString('id-ID', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          })} · {order.scheduledTime}
+        </Text>
+      )}
+
+      {order.addOns && order.addOns.length > 0 && (
+        <Text style={styles.addOnLine} numberOfLines={2}>
+          Add-on: {order.addOns.map((a) => a.name).join(', ')}
+        </Text>
+      )}
+
+      <Text style={styles.items} numberOfLines={3}>
         {itemsSummary}
       </Text>
 
@@ -86,7 +105,7 @@ export function OrderCard({ order, onEdit, onDelete, onStatusChange }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     borderRadius: 12,
     padding: 12,
     gap: 6,
@@ -105,7 +124,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   badge: {
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -113,7 +132,7 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   badgeTextLight: {
     color: '#ffffff',
@@ -122,9 +141,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  scheduleLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Brand.gold,
+  },
+  addOnLine: {
+    fontSize: 12,
+    color: Brand.inkMuted,
+    fontStyle: 'italic',
+  },
   items: {
     fontSize: 13,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   footerRow: {
     flexDirection: 'row',
@@ -146,11 +175,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   actionText: {
-    color: '#208AEF',
+    color: Brand.plum,
     fontWeight: '600',
   },
   deleteText: {
-    color: '#D93025',
+    color: Brand.danger,
   },
   statusRow: {
     flexDirection: 'row',
@@ -164,16 +193,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
     paddingHorizontal: 8,
   },
   statusChipActive: {
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
   },
   statusChipText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   statusChipTextActive: {
     color: '#ffffff',

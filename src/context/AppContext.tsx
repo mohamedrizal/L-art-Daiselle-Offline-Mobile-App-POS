@@ -4,7 +4,7 @@ import { createContext, ReactNode, useContext, useEffect, useRef, useState } fro
 import { writeAutoBackupSnapshot } from '@/utils/autoBackup';
 import { generateId } from '@/utils/id';
 
-export type PaymentMethod = 'cash' | 'qris' | 'transfer';
+export type PaymentMethod = 'cash' | 'qris';
 
 export type OrderStatus = 'pending' | 'on_progress' | 'completed' | 'refund';
 
@@ -22,6 +22,12 @@ export type OrderItem = {
   qty: number;
 };
 
+export type OrderAddOn = {
+  id: string;
+  name: string;
+  price: number;
+};
+
 export type Order = {
   id: string;
   customerName: string;
@@ -33,6 +39,10 @@ export type Order = {
   status: OrderStatus;
   createdAt: string;
   updatedAt: string;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  groupMemberNames: string[];
+  addOns: OrderAddOn[];
 };
 
 export type AppData = {
@@ -50,7 +60,24 @@ type AppContextValue = {
   addMenuItem: (item: Omit<MenuItem, 'id'>) => void;
   updateMenuItem: (id: string, patch: Omit<MenuItem, 'id'>) => void;
   deleteMenuItem: (id: string) => void;
-  addOrder: (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
+  addOrder: (
+    order: Omit<
+      Order,
+      | 'id'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'status'
+      | 'scheduledDate'
+      | 'scheduledTime'
+      | 'groupMemberNames'
+      | 'addOns'
+    > & {
+      scheduledDate?: string | null;
+      scheduledTime?: string | null;
+      groupMemberNames?: string[];
+      addOns?: OrderAddOn[];
+    }
+  ) => void;
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt' | 'updatedAt'>>) => void;
   deleteOrder: (id: string) => void;
   replaceAll: (data: AppData) => void;
@@ -109,6 +136,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const newOrder: Order = {
       ...order,
+      scheduledDate: order.scheduledDate ?? null,
+      scheduledTime: order.scheduledTime ?? null,
+      groupMemberNames: order.groupMemberNames ?? [],
+      addOns: order.addOns ?? [],
       id: generateId(),
       status: 'pending',
       createdAt: now,

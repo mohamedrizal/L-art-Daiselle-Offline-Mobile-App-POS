@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Brand } from '@/constants/theme';
 import { OrderItem } from '@/context/AppContext';
 import { formatRupiah } from '@/utils/formatRupiah';
 
@@ -14,7 +15,7 @@ export function CartRow({ item, onIncrease, onDecrease, onRemove }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        <Text style={styles.name} numberOfLines={1}>
+        <Text style={styles.name} numberOfLines={2}>
           {item.name}
         </Text>
         <Text style={styles.price}>{formatRupiah(item.price)}</Text>
@@ -50,7 +51,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
   },
   row: {
     flexDirection: 'row',
@@ -64,7 +65,7 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 13,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   removeButton: {
     minHeight: 44,
@@ -74,13 +75,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   removeButtonText: {
-    color: '#D93025',
+    color: Brand.danger,
     fontWeight: '600',
     fontSize: 13,
   },
   qtyLabel: {
     fontSize: 12,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   stepper: {
     flexDirection: 'row',
@@ -92,7 +93,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E0E1E6',
+    backgroundColor: Brand.parchmentSelected,
     borderRadius: 8,
   },
   stepButtonText: {
@@ -106,7 +107,7 @@ const styles = StyleSheet.create({
   },
   subtotalLabel: {
     fontSize: 12,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   subtotal: {
     fontWeight: '700',

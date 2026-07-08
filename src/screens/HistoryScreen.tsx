@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OrderCard } from '@/components/OrderCard';
 import { WaitingListModal } from '@/components/WaitingListModal';
+import { Brand, HeadingFont } from '@/constants/theme';
 import { getOrderStatus, Order, OrderStatus, useAppContext } from '@/context/AppContext';
 import { ORDER_STATUS_LABEL, ORDER_STATUS_OPTIONS } from '@/utils/orderStatus';
 
@@ -131,7 +132,7 @@ export function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Brand.parchment,
   },
   title: {
     fontSize: 20,
@@ -139,6 +140,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 4,
+    fontFamily: HeadingFont,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -147,13 +149,13 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
     borderRadius: 12,
     padding: 12,
   },
   summaryLabel: {
     fontSize: 12,
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   summaryValue: {
     fontSize: 22,
@@ -176,15 +178,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 20,
-    backgroundColor: '#F0F0F3',
+    backgroundColor: Brand.parchmentDark,
   },
   filterChipActive: {
-    backgroundColor: '#208AEF',
+    backgroundColor: Brand.plum,
   },
   filterChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#60646C',
+    color: Brand.inkMuted,
   },
   filterChipTextActive: {
     color: '#ffffff',
@@ -195,13 +197,13 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#60646C',
+    color: Brand.inkMuted,
     marginTop: 32,
   },
   sectionHeader: {
     fontWeight: '700',
     fontSize: 14,
-    color: '#60646C',
+    color: Brand.inkMuted,
     marginTop: 16,
     marginBottom: 8,
   },
