@@ -1,11 +1,15 @@
-import * as DocumentPicker from 'expo-document-picker';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Brand, HeadingFont } from '@/constants/theme';
 import { getOrderStatus, useAppContext } from '@/context/AppContext';
-import { createBackupFile, importBackup } from '@/utils/backup';
+import {
+  getLastSyncedAt,
+  isCloudSyncConfigured,
+  restoreFromCloud,
+  syncToCloud,
+} from '@/utils/cloudSync';
 import { createExcelFile } from '@/utils/excelExport';
 import { presentFileSaveOptions } from '@/utils/fileActions';
 import { formatRupiah } from '@/utils/formatRupiah';
@@ -19,11 +23,27 @@ function formatDateHeader(dateKey: string): string {
   });
 }
 
+function formatSyncTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function ReportScreen() {
   const { menuItems, orders, replaceAll } = useAppContext();
   const [isExporting, setIsExporting] = useState(false);
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isRestoringCloud, setIsRestoringCloud] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const cloudConfigured = isCloudSyncConfigured();
+
+  useEffect(() => {
+    getLastSyncedAt().then(setLastSyncedAt);
+  }, []);
 
   const completedOrders = orders.filter((order) => getOrderStatus(order) === 'completed');
 
@@ -75,39 +95,55 @@ export function ReportScreen() {
     }
   };
 
-  const handleBackup = async () => {
-    setIsBackingUp(true);
+  const handleSyncToCloud = async () => {
+    if (!cloudConfigured) {
+      Alert.alert('Supabase belum dikonfigurasi', 'Isi file .env terlebih dahulu untuk mengaktifkan sync ke cloud.');
+      return;
+    }
+    setIsSyncing(true);
     try {
-      const file = await createBackupFile({ menuItems, orders });
-      presentFileSaveOptions(file, { title: 'Simpan Cadangan', mimeType: 'application/json' });
-    } catch {
-      Alert.alert('Gagal backup', 'Terjadi kesalahan saat membuat file cadangan.');
+      const result = await syncToCloud({ menuItems, orders });
+      if (result.ok) {
+        setLastSyncedAt(await getLastSyncedAt());
+        Alert.alert('Berhasil', result.message);
+      } else {
+        Alert.alert('Gagal sync', result.message);
+      }
     } finally {
-      setIsBackingUp(false);
+      setIsSyncing(false);
     }
   };
 
-  const handleRestore = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: 'application/json' });
-    if (result.canceled || !result.assets[0]) {
+  const handleRestoreFromCloud = async () => {
+    if (!cloudConfigured) {
+      Alert.alert('Supabase belum dikonfigurasi', 'Isi file .env terlebih dahulu untuk mengaktifkan restore dari cloud.');
       return;
     }
-
-    setIsRestoring(true);
+    setIsRestoringCloud(true);
     try {
-      const data = await importBackup(result.assets[0].uri);
+      const result = await restoreFromCloud();
+      if (!result.ok) {
+        Alert.alert('Gagal restore', result.message);
+        return;
+      }
+      const { data } = result;
       Alert.alert(
-        'Muat Cadangan',
-        `Data saat ini akan ditimpa dengan cadangan ini (${data.menuItems.length} menu, ${data.orders.length} order). Lanjutkan?`,
+        'Restore dari Cloud',
+        `Data saat ini akan ditimpa dengan cadangan cloud ini (${data.menuItems.length} menu, ${data.orders.length} order). Lanjutkan?`,
         [
           { text: 'Batal', style: 'cancel' },
-          { text: 'Timpa Data', style: 'destructive', onPress: () => replaceAll(data) },
+          {
+            text: 'Timpa Data',
+            style: 'destructive',
+            onPress: async () => {
+              replaceAll(data);
+              setLastSyncedAt(await getLastSyncedAt());
+            },
+          },
         ]
       );
-    } catch {
-      Alert.alert('Gagal muat cadangan', 'File yang dipilih bukan file cadangan yang valid.');
     } finally {
-      setIsRestoring(false);
+      setIsRestoringCloud(false);
     }
   };
 
@@ -180,18 +216,26 @@ export function ReportScreen() {
           </Text>
         </Pressable>
 
+        <Text style={styles.syncStatus}>
+          {cloudConfigured
+            ? lastSyncedAt
+              ? `Terakhir sync: ${formatSyncTimestamp(lastSyncedAt)}`
+              : 'Belum pernah sync'
+            : 'Supabase belum dikonfigurasi'}
+        </Text>
+
         <View style={styles.backupRow}>
-          <Pressable style={styles.secondaryButton} onPress={handleBackup} disabled={isBackingUp}>
+          <Pressable style={styles.secondaryButton} onPress={handleSyncToCloud} disabled={isSyncing}>
             <Text style={styles.secondaryButtonText}>
-              {isBackingUp ? 'Menyimpan...' : 'Simpan Cadangan'}
+              {isSyncing ? 'Menyinkronkan...' : 'Sync ke Cloud'}
             </Text>
           </Pressable>
           <Pressable
             style={styles.secondaryButton}
-            onPress={handleRestore}
-            disabled={isRestoring}>
+            onPress={handleRestoreFromCloud}
+            disabled={isRestoringCloud}>
             <Text style={styles.secondaryButtonText}>
-              {isRestoring ? 'Memuat...' : 'Muat Cadangan'}
+              {isRestoringCloud ? 'Memuat...' : 'Restore dari Cloud'}
             </Text>
           </Pressable>
         </View>
@@ -291,6 +335,11 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  syncStatus: {
+    fontSize: 12,
+    color: Brand.inkMuted,
+    textAlign: 'center',
   },
   backupRow: {
     flexDirection: 'row',

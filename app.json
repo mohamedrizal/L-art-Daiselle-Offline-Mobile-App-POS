@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "l-art-daiselle-order-app",
+    "name": "L'Art Daiselle Order App",
     "slug": "l-art-daiselle-order-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -27,7 +27,9 @@
       ],
       "expo-sharing",
       "@react-native-community/datetimepicker",
-      "expo-font"
+      "expo-font",
+      "expo-sqlite",
+      "./plugins/withAndroidReleaseOptimizations.js"
     ],
     "experiments": {
       "typedRoutes": true,

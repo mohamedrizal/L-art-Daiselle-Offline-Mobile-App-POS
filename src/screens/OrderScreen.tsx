@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -374,7 +375,9 @@ export function OrderScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => setIsCustomerModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Info Pelanggan & PO</Text>
 
@@ -545,7 +548,7 @@ export function OrderScreen() {
               <Text style={styles.modalDoneButtonText}>Selesai</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
@@ -553,7 +556,9 @@ export function OrderScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => setIsAddOnModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Add-on</Text>
 
@@ -575,16 +580,18 @@ export function OrderScreen() {
                   value={addOnNameInput}
                   onChangeText={setAddOnNameInput}
                 />
-                <TextInput
-                  style={[styles.input, styles.addOnFormPriceInput]}
-                  placeholder="Harga"
-                  keyboardType="numeric"
-                  value={addOnPriceInput ? formatRupiah(Number(addOnPriceInput)) : ''}
-                  onChangeText={(text) => setAddOnPriceInput(text.replace(/\D/g, ''))}
-                />
-                <Pressable style={styles.addOnAddButton} onPress={handleAddAddOn}>
-                  <Text style={styles.addOnAddButtonText}>+ Tambah</Text>
-                </Pressable>
+                <View style={styles.addOnFormRow}>
+                  <TextInput
+                    style={[styles.input, styles.addOnFormPriceInput]}
+                    placeholder="Harga"
+                    keyboardType="numeric"
+                    value={addOnPriceInput ? formatRupiah(Number(addOnPriceInput)) : ''}
+                    onChangeText={(text) => setAddOnPriceInput(text.replace(/\D/g, ''))}
+                  />
+                  <Pressable style={styles.addOnAddButton} onPress={handleAddAddOn}>
+                    <Text style={styles.addOnAddButtonText}>+ Tambah</Text>
+                  </Pressable>
+                </View>
               </View>
             </ScrollView>
 
@@ -594,7 +601,7 @@ export function OrderScreen() {
               <Text style={styles.modalDoneButtonText}>Selesai</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -972,14 +979,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   addOnForm: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  addOnFormRow: {
     flexDirection: 'row',
     gap: 8,
   },
-  addOnFormNameInput: {
-    flex: 1,
-  },
+  addOnFormNameInput: {},
   addOnFormPriceInput: {
-    width: 110,
+    flex: 1,
   },
   addOnAddButton: {
     minHeight: 44,

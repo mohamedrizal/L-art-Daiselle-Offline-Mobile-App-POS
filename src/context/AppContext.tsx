@@ -1,57 +1,26 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 
-import { writeAutoBackupSnapshot } from '@/utils/autoBackup';
+import { migrateFromAsyncStorageIfNeeded } from '@/db/migrateFromAsyncStorage';
+import {
+  deleteMenuItemRow,
+  deleteOrderRow,
+  getAllMenuItems,
+  getAllOrders,
+  insertMenuItem,
+  insertOrder,
+  replaceAllData,
+  updateMenuItemRow,
+  updateOrderRow,
+} from '@/db/repository';
+import type { AppData, MenuItem, Order, OrderAddOn, OrderItem, OrderStatus, PaymentMethod } from '@/db/types';
+import { scheduleAutoSync, tryAutoSyncOnLaunch } from '@/utils/cloudSync';
 import { generateId } from '@/utils/id';
 
-export type PaymentMethod = 'cash' | 'qris';
-
-export type OrderStatus = 'pending' | 'on_progress' | 'completed' | 'refund';
-
-export type MenuItem = {
-  id: string;
-  name: string;
-  imageUri: string | null;
-  price: number;
-};
-
-export type OrderItem = {
-  menuItemId: string;
-  name: string;
-  price: number;
-  qty: number;
-};
-
-export type OrderAddOn = {
-  id: string;
-  name: string;
-  price: number;
-};
-
-export type Order = {
-  id: string;
-  customerName: string;
-  customerWhatsapp: string;
-  customerInstagram: string;
-  items: OrderItem[];
-  paymentMethod: PaymentMethod;
-  totalHarga: number;
-  status: OrderStatus;
-  createdAt: string;
-  updatedAt: string;
-  scheduledDate: string | null;
-  scheduledTime: string | null;
-  groupMemberNames: string[];
-  addOns: OrderAddOn[];
-};
-
-export type AppData = {
-  menuItems: MenuItem[];
-  orders: Order[];
-};
-
-const MENU_STORAGE_KEY = '@lartdaiselle/menuItems';
-const ORDERS_STORAGE_KEY = '@lartdaiselle/orders';
+// Re-exported so existing screens can keep importing these types from
+// '@/context/AppContext' unchanged — the canonical definitions now live in
+// '@/db/types' so the db layer doesn't have to import from this file.
+export type { AppData, MenuItem, Order, OrderAddOn, OrderItem, OrderStatus, PaymentMethod };
 
 type AppContextValue = {
   menuItems: MenuItem[];
@@ -90,46 +59,83 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const menuItemsRef = useRef(menuItems);
+  const ordersRef = useRef(orders);
 
   useEffect(() => {
     menuItemsRef.current = menuItems;
   }, [menuItems]);
 
   useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  const getSnapshot = (): AppData => ({
+    menuItems: menuItemsRef.current,
+    orders: ordersRef.current,
+  });
+
+  useEffect(() => {
     (async () => {
       try {
-        const [menuRaw, ordersRaw] = await Promise.all([
-          AsyncStorage.getItem(MENU_STORAGE_KEY),
-          AsyncStorage.getItem(ORDERS_STORAGE_KEY),
-        ]);
-        if (menuRaw) setMenuItems(JSON.parse(menuRaw));
-        if (ordersRaw) setOrders(JSON.parse(ordersRaw));
+        await migrateFromAsyncStorageIfNeeded();
+        const [loadedMenuItems, loadedOrders] = await Promise.all([getAllMenuItems(), getAllOrders()]);
+        setMenuItems(loadedMenuItems);
+        setOrders(loadedOrders);
+      } catch (error) {
+        console.warn('[AppContext] failed to load data from SQLite', error);
       } finally {
         setIsLoaded(true);
       }
     })();
   }, []);
 
+  // Silent auto-sync to cloud on launch and whenever the app returns to the
+  // foreground. No-ops instantly if Supabase isn't configured or the device
+  // is offline — offline is this app's normal operating mode.
   useEffect(() => {
     if (!isLoaded) return;
-    AsyncStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(menuItems)).catch(() => {});
-  }, [menuItems, isLoaded]);
+    tryAutoSyncOnLaunch(getSnapshot).catch(() => {});
 
-  useEffect(() => {
-    if (!isLoaded) return;
-    AsyncStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders)).catch(() => {});
-  }, [orders, isLoaded]);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        tryAutoSyncOnLaunch(getSnapshot).catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, [isLoaded]);
 
   const addMenuItem: AppContextValue['addMenuItem'] = (item) => {
-    setMenuItems((prev) => [...prev, { ...item, id: generateId() }]);
+    const newItem: MenuItem = { ...item, id: generateId() };
+    setMenuItems((prev) => [...prev, newItem]);
+    insertMenuItem(newItem).catch((error) =>
+      console.warn('[AppContext] insertMenuItem failed', error)
+    );
+    scheduleAutoSync(getSnapshot);
   };
 
   const updateMenuItem: AppContextValue['updateMenuItem'] = (id, patch) => {
-    setMenuItems((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    let updated: MenuItem | undefined;
+    setMenuItems((prev) =>
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        updated = { ...m, ...patch };
+        return updated;
+      })
+    );
+    if (updated) {
+      updateMenuItemRow(updated).catch((error) =>
+        console.warn('[AppContext] updateMenuItemRow failed', error)
+      );
+    }
+    scheduleAutoSync(getSnapshot);
   };
 
   const deleteMenuItem: AppContextValue['deleteMenuItem'] = (id) => {
     setMenuItems((prev) => prev.filter((m) => m.id !== id));
+    deleteMenuItemRow(id).catch((error) =>
+      console.warn('[AppContext] deleteMenuItemRow failed', error)
+    );
+    scheduleAutoSync(getSnapshot);
   };
 
   const addOrder: AppContextValue['addOrder'] = (order) => {
@@ -145,27 +151,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    setOrders((prev) => {
-      const next = [...prev, newOrder];
-      writeAutoBackupSnapshot({ menuItems: menuItemsRef.current, orders: next }).catch(() => {});
-      return next;
-    });
+    setOrders((prev) => [...prev, newOrder]);
+    insertOrder(newOrder).catch((error) => console.warn('[AppContext] insertOrder failed', error));
+    scheduleAutoSync(getSnapshot);
   };
 
   const updateOrder: AppContextValue['updateOrder'] = (id, patch) => {
     const now = new Date().toISOString();
+    let updated: Order | undefined;
     setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, ...patch, updatedAt: now } : o))
+      prev.map((o) => {
+        if (o.id !== id) return o;
+        updated = { ...o, ...patch, updatedAt: now };
+        return updated;
+      })
     );
+    if (updated) {
+      updateOrderRow(updated).catch((error) =>
+        console.warn('[AppContext] updateOrderRow failed', error)
+      );
+    }
+    scheduleAutoSync(getSnapshot);
   };
 
   const deleteOrder: AppContextValue['deleteOrder'] = (id) => {
     setOrders((prev) => prev.filter((o) => o.id !== id));
+    deleteOrderRow(id).catch((error) => console.warn('[AppContext] deleteOrderRow failed', error));
+    scheduleAutoSync(getSnapshot);
   };
 
   const replaceAll: AppContextValue['replaceAll'] = (data) => {
     setMenuItems(data.menuItems);
     setOrders(data.orders);
+    replaceAllData(data).catch((error) =>
+      console.warn('[AppContext] replaceAllData failed', error)
+    );
+    scheduleAutoSync(() => data);
   };
 
   return (
