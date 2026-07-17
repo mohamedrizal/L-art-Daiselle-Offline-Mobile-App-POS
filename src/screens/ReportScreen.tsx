@@ -5,10 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Brand, HeadingFont } from '@/constants/theme';
 import { getOrderStatus, useAppContext } from '@/context/AppContext';
 import {
-  getLastSyncedAt,
+  getLastRealtimeConnectedAt,
+  getSyncStatus,
   isCloudSyncConfigured,
-  restoreFromCloud,
-  syncToCloud,
+  isRealtimeConnected,
 } from '@/utils/cloudSync';
 import { createExcelFile } from '@/utils/excelExport';
 import { presentFileSaveOptions } from '@/utils/fileActions';
@@ -33,17 +33,30 @@ function formatSyncTimestamp(iso: string): string {
   });
 }
 
+// How often the on-screen realtime status text is refreshed. This is purely
+// a UI polling interval for isRealtimeConnected()/getLastRealtimeConnectedAt()
+// (both cheap in-memory reads) — it has nothing to do with how often data
+// actually syncs, which is realtime-driven / event-driven elsewhere.
+const STATUS_POLL_MS = 3000;
+
 export function ReportScreen() {
-  const { menuItems, orders, replaceAll } = useAppContext();
+  const { orders, syncNow } = useAppContext();
   const [isExporting, setIsExporting] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isRestoringCloud, setIsRestoringCloud] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [realtimeActive, setRealtimeActive] = useState(isRealtimeConnected());
+  const [lastConnectedAt, setLastConnectedAt] = useState<string | null>(getLastRealtimeConnectedAt());
+  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   const cloudConfigured = isCloudSyncConfigured();
 
   useEffect(() => {
-    getLastSyncedAt().then(setLastSyncedAt);
-  }, []);
+    if (!cloudConfigured) return;
+    const interval = setInterval(() => {
+      setRealtimeActive(isRealtimeConnected());
+      setLastConnectedAt(getLastRealtimeConnectedAt());
+      setSyncStatus(getSyncStatus());
+    }, STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [cloudConfigured]);
 
   const completedOrders = orders.filter((order) => getOrderStatus(order) === 'completed');
 
@@ -95,57 +108,32 @@ export function ReportScreen() {
     }
   };
 
-  const handleSyncToCloud = async () => {
-    if (!cloudConfigured) {
-      Alert.alert('Supabase belum dikonfigurasi', 'Isi file .env terlebih dahulu untuk mengaktifkan sync ke cloud.');
-      return;
-    }
-    setIsSyncing(true);
+  const handleSyncNow = async () => {
+    setIsSyncingNow(true);
     try {
-      const result = await syncToCloud({ menuItems, orders });
-      if (result.ok) {
-        setLastSyncedAt(await getLastSyncedAt());
-        Alert.alert('Berhasil', result.message);
-      } else {
-        Alert.alert('Gagal sync', result.message);
-      }
+      const result = await syncNow();
+      setRealtimeActive(isRealtimeConnected());
+      setLastConnectedAt(getLastRealtimeConnectedAt());
+      Alert.alert(result.ok ? 'Berhasil' : 'Gagal sync', result.message);
     } finally {
-      setIsSyncing(false);
+      setIsSyncingNow(false);
     }
   };
 
-  const handleRestoreFromCloud = async () => {
-    if (!cloudConfigured) {
-      Alert.alert('Supabase belum dikonfigurasi', 'Isi file .env terlebih dahulu untuk mengaktifkan restore dari cloud.');
-      return;
-    }
-    setIsRestoringCloud(true);
-    try {
-      const result = await restoreFromCloud();
-      if (!result.ok) {
-        Alert.alert('Gagal restore', result.message);
-        return;
-      }
-      const { data } = result;
-      Alert.alert(
-        'Restore dari Cloud',
-        `Data saat ini akan ditimpa dengan cadangan cloud ini (${data.menuItems.length} menu, ${data.orders.length} order). Lanjutkan?`,
-        [
-          { text: 'Batal', style: 'cancel' },
-          {
-            text: 'Timpa Data',
-            style: 'destructive',
-            onPress: async () => {
-              replaceAll(data);
-              setLastSyncedAt(await getLastSyncedAt());
-            },
-          },
-        ]
-      );
-    } finally {
-      setIsRestoringCloud(false);
-    }
-  };
+  // syncStatus === 'error' takes priority even when the realtime channel is
+  // connected — the socket can be "SUBSCRIBED" while the actual menu_items/
+  // orders tables don't exist yet (reconcileFull/pushRow fail against
+  // PostgREST independently of the realtime channel), which would otherwise
+  // show a falsely reassuring "Realtime aktif" with no real data syncing.
+  const syncStatusText = !cloudConfigured
+    ? 'Supabase belum dikonfigurasi'
+    : syncStatus === 'error'
+      ? 'Gagal sync — cek tabel/kredensial Supabase (sudah jalankan supabase/schema.sql?)'
+      : realtimeActive
+        ? `Realtime aktif — data sinkron otomatis${
+            lastConnectedAt ? ` (sejak ${formatSyncTimestamp(lastConnectedAt)})` : ''
+          }`
+        : 'Offline — akan sync otomatis saat online';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -216,29 +204,14 @@ export function ReportScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.syncStatus}>
-          {cloudConfigured
-            ? lastSyncedAt
-              ? `Terakhir sync: ${formatSyncTimestamp(lastSyncedAt)}`
-              : 'Belum pernah sync'
-            : 'Supabase belum dikonfigurasi'}
-        </Text>
+        <Text style={styles.syncStatus}>{syncStatusText}</Text>
 
-        <View style={styles.backupRow}>
-          <Pressable style={styles.secondaryButton} onPress={handleSyncToCloud} disabled={isSyncing}>
-            <Text style={styles.secondaryButtonText}>
-              {isSyncing ? 'Menyinkronkan...' : 'Sync ke Cloud'}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryButton}
-            onPress={handleRestoreFromCloud}
-            disabled={isRestoringCloud}>
-            <Text style={styles.secondaryButtonText}>
-              {isRestoringCloud ? 'Memuat...' : 'Restore dari Cloud'}
-            </Text>
-          </Pressable>
-        </View>
+        <Pressable
+          style={styles.syncButton}
+          onPress={handleSyncNow}
+          disabled={isSyncingNow || !cloudConfigured}>
+          <Text style={styles.syncButtonText}>{isSyncingNow ? 'Menyinkronkan...' : 'Sync Sekarang'}</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -341,19 +314,14 @@ const styles = StyleSheet.create({
     color: Brand.inkMuted,
     textAlign: 'center',
   },
-  backupRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
+  syncButton: {
     minHeight: 48,
     borderRadius: 8,
     backgroundColor: Brand.parchmentDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryButtonText: {
+  syncButtonText: {
     color: Brand.plum,
     fontWeight: '700',
   },

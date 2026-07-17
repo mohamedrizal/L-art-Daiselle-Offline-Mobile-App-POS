@@ -150,12 +150,14 @@ export function MenuScreen() {
             <TextInput
               style={styles.input}
               placeholder="Nama menu"
+              placeholderTextColor={Brand.inkMuted}
               value={form.name}
               onChangeText={(name) => setForm((prev) => ({ ...prev, name }))}
             />
             <TextInput
               style={styles.input}
               placeholder="Harga"
+              placeholderTextColor={Brand.inkMuted}
               keyboardType="numeric"
               value={form.price ? formatRupiah(Number(form.price)) : ''}
               onChangeText={(text) =>

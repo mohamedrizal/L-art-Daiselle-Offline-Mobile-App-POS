@@ -1,26 +1,39 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import * as Network from 'expo-network';
 
-import type { AppData } from '@/db/types';
+import {
+  getAllMenuItemsIncludingDeleted,
+  getAllOrdersIncludingDeleted,
+  getMenuItemRecordById,
+  getOrderRecordById,
+  menuItemRecordToRow,
+  orderRecordToRow,
+  rowToMenuItemRecord,
+  rowToOrderRecord,
+  upsertMenuItemRecord,
+  upsertOrderRecord,
+  type MenuItemRow,
+  type OrderRow,
+} from '@/db/repository';
+import type { MenuItemRecord, OrderRecord } from '@/db/types';
 import { supabase } from '@/lib/supabase';
-import { generateId } from '@/utils/id';
 
-const TABLE = 'app_backups';
-const DEVICE_ID_KEY = '@lartdaiselle/deviceId';
-const LAST_SYNCED_KEY = '@lartdaiselle/lastSyncedAt';
-const AUTO_SYNC_DEBOUNCE_MS = 4000;
+const MENU_TABLE = 'menu_items';
+const ORDERS_TABLE = 'orders';
 
-export type SyncStatus = 'idle' | 'syncing' | 'error' | 'not-configured';
+export type SyncTable = typeof MENU_TABLE | typeof ORDERS_TABLE;
 
-export type CloudSyncResult =
-  | { ok: true; message: string }
-  | { ok: false; message: string };
+export type SyncStatus = 'idle' | 'syncing' | 'error' | 'not-configured' | 'offline';
 
-export type CloudRestoreResult =
-  | { ok: true; message: string; data: AppData }
-  | { ok: false; message: string };
+export type RealtimeCallbacks = {
+  onMenuItemChange: (record: MenuItemRecord) => void;
+  onOrderChange: (record: OrderRecord) => void;
+};
 
 let status: SyncStatus = supabase ? 'idle' : 'not-configured';
+let realtimeChannel: RealtimeChannel | null = null;
+let realtimeConnected = false;
+let lastRealtimeConnectedAt: string | null = null;
 
 export function getSyncStatus(): SyncStatus {
   return status;
@@ -30,16 +43,12 @@ export function isCloudSyncConfigured(): boolean {
   return supabase !== null;
 }
 
-async function getDeviceId(): Promise<string> {
-  const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
-  if (existing) return existing;
-  const id = generateId();
-  await AsyncStorage.setItem(DEVICE_ID_KEY, id);
-  return id;
+export function isRealtimeConnected(): boolean {
+  return realtimeConnected;
 }
 
-export async function getLastSyncedAt(): Promise<string | null> {
-  return AsyncStorage.getItem(LAST_SYNCED_KEY);
+export function getLastRealtimeConnectedAt(): string | null {
+  return lastRealtimeConnectedAt;
 }
 
 async function isOnline(): Promise<boolean> {
@@ -54,111 +63,211 @@ async function isOnline(): Promise<boolean> {
 }
 
 /**
- * Pushes a full local snapshot to Supabase (upsert by device_id). Never
- * throws — offline / not-configured / network errors are reported back as
- * `{ ok: false, message }` so callers (UI or silent auto-sync) can decide
- * what to do without try/catch.
+ * Fire-and-forget upsert of a single menu item / order row to Supabase.
+ * Called by AppContext right after every local CRUD write (optimistic
+ * local-first: SQLite + React state already updated by the time this runs).
+ * Never throws — not-configured / offline / network / RLS errors are all
+ * swallowed, since push failures must never surface to the user or block
+ * the UI. reconcileFull() is the safety net that catches anything a failed
+ * push misses once the device is back online.
  */
-export async function syncToCloud(data: AppData): Promise<CloudSyncResult> {
-  if (!supabase) {
-    status = 'not-configured';
-    return { ok: false, message: 'Supabase belum dikonfigurasi. Isi file .env terlebih dahulu.' };
+export function pushRow(table: 'menu_items', record: MenuItemRecord): void;
+export function pushRow(table: 'orders', record: OrderRecord): void;
+export function pushRow(table: SyncTable, record: MenuItemRecord | OrderRecord): void {
+  if (!supabase) return;
+  const client = supabase;
+
+  // Branched (rather than a single `.from(table).upsert(row)` with a
+  // union-typed `row`) so each upsert() call gets a concretely-typed
+  // argument — supabase-js infers its generic Row type per call, and a
+  // union argument causes it to pin Row from one branch and reject the
+  // other's extra columns.
+  const send = async (): Promise<{ error: unknown }> =>
+    table === MENU_TABLE
+      ? client.from(MENU_TABLE).upsert(menuItemRecordToRow(record as MenuItemRecord))
+      : client.from(ORDERS_TABLE).upsert(orderRecordToRow(record as OrderRecord));
+
+  (async () => {
+    try {
+      if (!(await isOnline())) return;
+      const { error } = await send();
+      status = error ? 'error' : 'idle';
+      if (error) console.warn(`[cloudSync] pushRow(${table}) failed`, error);
+    } catch (error) {
+      status = 'error';
+      console.warn(`[cloudSync] pushRow(${table}) threw`, error);
+    }
+  })();
+}
+
+/**
+ * Applies an incoming remote row to local SQLite using last-write-wins: if
+ * there's no local row yet, or the remote row's updatedAt is strictly newer
+ * than the local one, the remote version overwrites local and the callback
+ * fires so AppContext can update React state. Otherwise (local is newer or
+ * they're tied) the event is ignored — local already owns the newest
+ * version and its own pending/future push will converge the remote copy.
+ */
+async function applyIncomingMenuItem(remote: MenuItemRecord, callbacks: RealtimeCallbacks): Promise<void> {
+  try {
+    const local = await getMenuItemRecordById(remote.id);
+    if (local && local.updatedAt >= remote.updatedAt) return;
+    await upsertMenuItemRecord(remote);
+    callbacks.onMenuItemChange(remote);
+  } catch (error) {
+    console.warn('[cloudSync] applyIncomingMenuItem failed', error);
   }
-  if (!(await isOnline())) {
-    return { ok: false, message: 'Tidak ada koneksi internet.' };
+}
+
+async function applyIncomingOrder(remote: OrderRecord, callbacks: RealtimeCallbacks): Promise<void> {
+  try {
+    const local = await getOrderRecordById(remote.id);
+    if (local && local.updatedAt >= remote.updatedAt) return;
+    await upsertOrderRecord(remote);
+    callbacks.onOrderChange(remote);
+  } catch (error) {
+    console.warn('[cloudSync] applyIncomingOrder failed', error);
+  }
+}
+
+/**
+ * Subscribes to Supabase Realtime `postgres_changes` (INSERT/UPDATE) for
+ * `menu_items` and `orders`. Returns an unsubscribe function — callers
+ * (AppContext) MUST call it on unmount to avoid a duplicate/leaked channel.
+ *
+ * No-op (returns a no-op unsubscribe) if Supabase isn't configured. Safe to
+ * call multiple times: an existing channel is torn down first so repeated
+ * calls (e.g. a stray double effect run) never leave two channels open.
+ */
+export function subscribeToRealtimeChanges(callbacks: RealtimeCallbacks): () => void {
+  if (!supabase) return () => {};
+  const client = supabase;
+
+  if (realtimeChannel) {
+    client.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+    realtimeConnected = false;
   }
 
-  status = 'syncing';
-  try {
-    const deviceId = await getDeviceId();
-    const { error } = await supabase.from(TABLE).upsert({
-      device_id: deviceId,
-      data,
-      updated_at: new Date().toISOString(),
+  realtimeChannel = client
+    .channel('lartdaiselle-sync')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: MENU_TABLE },
+      (payload) => {
+        const row = payload.new as MenuItemRow | undefined;
+        if (!row || !row.id) return;
+        void applyIncomingMenuItem(rowToMenuItemRecord(row), callbacks);
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: ORDERS_TABLE },
+      (payload) => {
+        const row = payload.new as OrderRow | undefined;
+        if (!row || !row.id) return;
+        void applyIncomingOrder(rowToOrderRecord(row), callbacks);
+      }
+    )
+    .subscribe((subStatus) => {
+      if (subStatus === 'SUBSCRIBED') {
+        realtimeConnected = true;
+        lastRealtimeConnectedAt = new Date().toISOString();
+      } else if (subStatus === 'CLOSED' || subStatus === 'CHANNEL_ERROR' || subStatus === 'TIMED_OUT') {
+        realtimeConnected = false;
+      }
     });
-    if (error) throw error;
 
-    await AsyncStorage.setItem(LAST_SYNCED_KEY, new Date().toISOString());
-    status = 'idle';
-    return { ok: true, message: 'Berhasil sync ke cloud.' };
-  } catch (error) {
-    status = 'error';
-    console.warn('[cloudSync] syncToCloud failed', error);
-    return { ok: false, message: 'Gagal sync ke cloud. Coba lagi nanti.' };
-  }
+  return () => {
+    realtimeConnected = false;
+    if (realtimeChannel) {
+      client.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
+  };
 }
 
 /**
- * Pulls this device's last pushed snapshot from Supabase. Does not apply it
- * — caller is expected to confirm with the user (Alert) then call
- * replaceAll(data) themselves, mirroring the old JSON restore flow.
+ * Two-way merge between local SQLite and Supabase, by id + updatedAt
+ * (last-write-wins): whichever side has the newer `updatedAt` for a given
+ * row wins and overwrites the other side; a row missing entirely on one
+ * side is copied to it. Includes soft-deleted rows on both sides so
+ * tombstones propagate too.
  */
-export async function restoreFromCloud(): Promise<CloudRestoreResult> {
-  if (!supabase) {
-    status = 'not-configured';
-    return { ok: false, message: 'Supabase belum dikonfigurasi. Isi file .env terlebih dahulu.' };
+function reconcileTable<T extends { id: string; updatedAt: string }>(
+  remote: T[],
+  local: T[],
+  handlers: { apply: (record: T) => Promise<void>; push: (record: T) => void }
+): Promise<void[]> {
+  const remoteById = new Map(remote.map((r) => [r.id, r]));
+  const localById = new Map(local.map((r) => [r.id, r]));
+  const applies: Promise<void>[] = [];
+
+  for (const remoteRecord of remote) {
+    const localRecord = localById.get(remoteRecord.id);
+    if (!localRecord || remoteRecord.updatedAt > localRecord.updatedAt) {
+      applies.push(handlers.apply(remoteRecord));
+    }
   }
+
+  for (const localRecord of local) {
+    const remoteRecord = remoteById.get(localRecord.id);
+    if (!remoteRecord || localRecord.updatedAt > remoteRecord.updatedAt) {
+      handlers.push(localRecord);
+    }
+  }
+
+  return Promise.all(applies);
+}
+
+/**
+ * Full two-way reconciliation between local SQLite and Supabase. Meant to
+ * run at app launch and whenever the app returns to the foreground — a
+ * safety net for realtime events that were missed while the device was
+ * offline, backgrounded, or killed. No-op if Supabase isn't configured;
+ * sets status to 'offline' (not 'error') when there's no network, since
+ * that's this app's normal operating mode, not a failure.
+ */
+export async function reconcileFull(callbacks: RealtimeCallbacks): Promise<void> {
+  if (!supabase) return;
   if (!(await isOnline())) {
-    return { ok: false, message: 'Tidak ada koneksi internet.' };
+    status = 'offline';
+    return;
   }
 
   status = 'syncing';
   try {
-    const deviceId = await getDeviceId();
-    const { data: row, error } = await supabase
-      .from(TABLE)
-      .select('data, updated_at')
-      .eq('device_id', deviceId)
-      .maybeSingle();
-    if (error) throw error;
+    const [remoteMenuResult, remoteOrdersResult, localMenu, localOrders] = await Promise.all([
+      supabase.from(MENU_TABLE).select('*'),
+      supabase.from(ORDERS_TABLE).select('*'),
+      getAllMenuItemsIncludingDeleted(),
+      getAllOrdersIncludingDeleted(),
+    ]);
+    if (remoteMenuResult.error) throw remoteMenuResult.error;
+    if (remoteOrdersResult.error) throw remoteOrdersResult.error;
 
-    if (!row) {
-      status = 'idle';
-      return { ok: false, message: 'Belum ada cadangan di cloud untuk perangkat ini.' };
-    }
+    const remoteMenu = (remoteMenuResult.data ?? []).map((row) => rowToMenuItemRecord(row as MenuItemRow));
+    const remoteOrders = (remoteOrdersResult.data ?? []).map((row) => rowToOrderRecord(row as OrderRow));
 
-    const parsed = row.data as AppData;
-    if (!Array.isArray(parsed?.menuItems) || !Array.isArray(parsed?.orders)) {
-      throw new Error('Cloud backup payload is malformed');
-    }
+    await reconcileTable(remoteMenu, localMenu, {
+      apply: async (record) => {
+        await upsertMenuItemRecord(record);
+        callbacks.onMenuItemChange(record);
+      },
+      push: (record) => pushRow(MENU_TABLE, record),
+    });
 
-    await AsyncStorage.setItem(LAST_SYNCED_KEY, new Date().toISOString());
+    await reconcileTable(remoteOrders, localOrders, {
+      apply: async (record) => {
+        await upsertOrderRecord(record);
+        callbacks.onOrderChange(record);
+      },
+      push: (record) => pushRow(ORDERS_TABLE, record),
+    });
+
     status = 'idle';
-    return { ok: true, message: 'Berhasil mengambil data dari cloud.', data: parsed };
   } catch (error) {
     status = 'error';
-    console.warn('[cloudSync] restoreFromCloud failed', error);
-    return { ok: false, message: 'Gagal mengambil data dari cloud.' };
-  }
-}
-
-let autoSyncTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * Silent, debounced auto-sync used after local mutations. No-ops instantly
- * (no timer, no network check) when Supabase isn't configured, and swallows
- * any failure — auto-sync must never surface an error to the user or block
- * the UI, offline is the normal operating mode for this app.
- */
-export function scheduleAutoSync(getData: () => AppData, delayMs = AUTO_SYNC_DEBOUNCE_MS): void {
-  if (!supabase) return;
-  if (autoSyncTimer) clearTimeout(autoSyncTimer);
-  autoSyncTimer = setTimeout(() => {
-    autoSyncTimer = null;
-    syncToCloud(getData()).catch(() => {});
-  }, delayMs);
-}
-
-/**
- * Silent auto-sync attempt for app foreground/launch. Same no-throw,
- * no-op-when-unconfigured contract as scheduleAutoSync.
- */
-export async function tryAutoSyncOnLaunch(getData: () => AppData): Promise<void> {
-  if (!supabase) return;
-  try {
-    await syncToCloud(getData());
-  } catch {
-    // syncToCloud already swallows its own errors; this catch only guards
-    // against unexpected throws so launch-time sync can never crash the app.
+    console.warn('[cloudSync] reconcileFull failed', error);
   }
 }

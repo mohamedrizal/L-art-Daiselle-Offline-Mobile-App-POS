@@ -12,6 +12,7 @@ export type MenuItem = {
   name: string;
   imageUri: string | null;
   price: number;
+  updatedAt: string;
 };
 
 export type OrderItem = {
@@ -48,3 +49,17 @@ export type AppData = {
   menuItems: MenuItem[];
   orders: Order[];
 };
+
+// --- Internal sync/reconciliation types ------------------------------------
+//
+// MenuItemRecord / OrderRecord extend the public MenuItem/Order shapes with a
+// `deletedAt` soft-delete tombstone (null = not deleted, ISO timestamp =
+// deleted at that time). They exist ONLY for the db layer (repository.ts)
+// and the cloud sync layer (utils/cloudSync.ts) to do reconciliation/merge
+// logic and propagate deletions to other devices via Supabase Realtime.
+//
+// AppContextValue and every UI screen only ever see MenuItem/Order — rows
+// with a non-null deletedAt are filtered out before they ever reach React
+// state, so the UI never needs to know soft-delete exists.
+export type MenuItemRecord = MenuItem & { deletedAt: string | null };
+export type OrderRecord = Order & { deletedAt: string | null };

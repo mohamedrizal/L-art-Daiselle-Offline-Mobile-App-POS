@@ -25,7 +25,18 @@ export async function migrateFromAsyncStorageIfNeeded(): Promise<void> {
 
   if (menuRaw || ordersRaw) {
     try {
-      const menuItems: MenuItem[] = menuRaw ? JSON.parse(menuRaw) : [];
+      // Legacy AsyncStorage menu items pre-date the `updatedAt` field added
+      // for sync conflict resolution — backfill it to "now" for any item
+      // that doesn't already have one so it doesn't look infinitely stale.
+      const now = new Date().toISOString();
+      const rawMenuItems: Array<Partial<MenuItem>> = menuRaw ? JSON.parse(menuRaw) : [];
+      const menuItems: MenuItem[] = rawMenuItems.map((item) => ({
+        id: item.id!,
+        name: item.name!,
+        imageUri: item.imageUri ?? null,
+        price: item.price!,
+        updatedAt: item.updatedAt ?? now,
+      }));
       const orders: Order[] = ordersRaw ? JSON.parse(ordersRaw) : [];
       await replaceAllData({ menuItems, orders });
     } catch (error) {

@@ -385,12 +385,14 @@ export function OrderScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Nama Pelanggan"
+                placeholderTextColor={Brand.inkMuted}
                 value={customerName}
                 onChangeText={setCustomerName}
               />
               <TextInput
                 style={styles.input}
                 placeholder="No. WhatsApp (opsional)"
+                placeholderTextColor={Brand.inkMuted}
                 keyboardType="phone-pad"
                 value={formatPhoneNumber(customerWhatsapp)}
                 onChangeText={(text) => setCustomerWhatsapp(text.replace(/\D/g, ''))}
@@ -398,6 +400,7 @@ export function OrderScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Nama Instagram (opsional)"
+                placeholderTextColor={Brand.inkMuted}
                 autoCapitalize="none"
                 value={customerInstagram}
                 onChangeText={setCustomerInstagram}
@@ -421,6 +424,7 @@ export function OrderScreen() {
                         <TextInput
                           style={[styles.input, styles.groupMemberInput]}
                           placeholder={`Nama anggota ${index + 1}`}
+                          placeholderTextColor={Brand.inkMuted}
                           value={name}
                           onChangeText={(text) => updateGroupMember(index, text)}
                         />
@@ -577,6 +581,7 @@ export function OrderScreen() {
                 <TextInput
                   style={[styles.input, styles.addOnFormNameInput]}
                   placeholder="Nama Add-on"
+                  placeholderTextColor={Brand.inkMuted}
                   value={addOnNameInput}
                   onChangeText={setAddOnNameInput}
                 />
@@ -584,6 +589,7 @@ export function OrderScreen() {
                   <TextInput
                     style={[styles.input, styles.addOnFormPriceInput]}
                     placeholder="Harga"
+                    placeholderTextColor={Brand.inkMuted}
                     keyboardType="numeric"
                     value={addOnPriceInput ? formatRupiah(Number(addOnPriceInput)) : ''}
                     onChangeText={(text) => setAddOnPriceInput(text.replace(/\D/g, ''))}
